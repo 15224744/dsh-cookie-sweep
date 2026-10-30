@@ -41,10 +41,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/<你的用户名>/dsh-cookie-sweep.git"
+    "url": "git+https://github.com/15224744/dsh-cookie-sweep.git"
   },
   "bugs": {
-    "url": "https://github.com/<你的用户名>/dsh-cookie-sweep/issues"
+    "url": "https://github.com/15224744/dsh-cookie-sweep/issues"
   },
-  "homepage": "https://github.com/<你的用户名>/dsh-cookie-sweep#readme"
+  "homepage": "https://github.com/15224744/dsh-cookie-sweep#readme"
 }
