@@ -1,0 +1,7 @@
+2026-10-30T06:23:53.884Z sentinel started (wscript) pids=3576
+2026/10/30 14:23 [vbs] sentinel start, watching 3576 (+DeepSeek Harness.exe), timeout 12h
+2026/10/30 14:30 [vbs] targets gone, sweeping
+2026-10-30T06:30:22.266Z cookie-sweep：2026/10/30 14:30:22 清掉 4 条登录 cookie，释放约 1.1 KB
+2026/10/30 14:30 [vbs] sentinel done
+2026-10-30T06:31:45.270Z sentinel started (wscript) pids=18180
+2026/10/30 14:31 [vbs] sentinel start, watching 18180 (+DeepSeek Harness.exe), timeout 12h

@@ -1,5 +1,7 @@
 node_modules/
 *.log
+# 示例日志要进仓库，其余日志不进
+!docs/example-sweep.log
 backups/
 state/
 .DS_Store
