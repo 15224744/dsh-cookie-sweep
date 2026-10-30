@@ -1,0 +1,9 @@
+* text=auto
+*.mjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+# WSH 对行尾不挑剔，但别让 git 改它的字节：这个文件必须保持纯 ASCII（见 README「踩过的坑」）
+*.vbs -text
+*.cmd -text

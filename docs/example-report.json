@@ -1,0 +1,35 @@
+{
+  "at": "2026-10-30T06:30:22.257Z",
+  "dryRun": false,
+  "scope": "auth",
+  "deleted": 4,
+  "freed": 1092,
+  "freedText": "1.1 KB",
+  "totalBefore": 4,
+  "authBefore": 4,
+  "failed": 0,
+  "dbs": [
+    {
+      "label": "default",
+      "ok": true,
+      "totalBefore": 4,
+      "authBefore": 4,
+      "deleted": 4,
+      "freed": 1092,
+      "backup": "%USERPROFILE%\\.dsh\\cookie-sweep\\backups\\Cookies-default-<时间戳>.db",
+      "ms": 4,
+      "file": "dsh-desktop"
+    },
+    {
+      "label": "partition:dsh-platform-<sha256>",
+      "ok": true,
+      "totalBefore": 0,
+      "authBefore": 0,
+      "deleted": 0,
+      "freed": 0,
+      "backup": null,
+      "ms": 0,
+      "file": "dsh-platform-<sha256>"
+    }
+  ]
+}
