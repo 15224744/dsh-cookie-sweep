@@ -1,5 +1,16 @@
 # 更新记录
 
+
+## 0.2.0 — 2026-11-02
+
+安全优先。修掉一个会在**应用还活着时**动库的真问题。
+
+- 删掉「pid 消失但进程名还在 → 等 120 秒照清」这条兜底。宿主是多进程 Electron，pid 先消失、主窗口还在，于是哨兵会在应用运行时删掉 `dsh-auth-*`，那正是宿主自己的登录态。
+- `bin/helper.mjs` 写库前再查一次 `tasklist`，DSH 还在就跳过（`--force-run` 可强制）。
+- 新退出条件：pid + 进程名都消失满 45 秒才清；等待期间进程名回来就不扫直接退出；进程名一直不消失最多等 90 秒放弃；12 小时死线。
+- 26H2 之后 WSH 的 `GetObject("winmgmts:...") ` 会报 `0x80041021`（同机 PowerShell 的 CIM/COM 都正常），改用 `WbemScripting.SWbemLocator` 的 `ConnectServer`。
+- 新增 `test/safety.test.mjs`（10 项），合计 47 项测试。
+
 ## 0.1.5
 
 - `helper.mjs` 支持 `--help` / `help`，把用法、选项、退出码写清楚。

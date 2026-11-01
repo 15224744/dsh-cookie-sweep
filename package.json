@@ -1,7 +1,7 @@
 {
   "name": "dsh-cookie-sweep",
-  "version": "0.1.5",
-  "description": "顺手扫掉 DSH 登录留下的 dsh-auth-* cookie（每次启动端口都变，名字跟着变，30 天不清理，攒够 16KB 请求头就会被 431）。退出后自动清一次，也可以手动 status / dry-run / apply。",
+  "version": "0.2.0",
+  "description": "DSH 登录 cookie 清理：宿主退出后清掉历史 dsh-auth-*（默认只删本机域名、每库单独备份、宿主活着绝不动手）",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -16,11 +16,10 @@
     "bin",
     "cordis.patch.yml",
     "README.md",
-    "INSTALL.md",
-    "CHANGELOG.md"
+    "INSTALL.md"
   ],
   "scripts": {
-    "test": "node test/sweep.test.mjs && node test/sentinel.test.mjs"
+    "test": "node test/sweep.test.mjs && node test/sentinel.test.mjs && node test/safety.test.mjs"
   },
   "dsh": {
     "bundle": {
@@ -32,19 +31,10 @@
     "dsh-plugin",
     "deepseek-harness",
     "cookies",
-    "maintenance",
-    "431"
+    "maintenance"
   ],
   "license": "MIT",
   "engines": {
     "node": ">=22"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/15224744/dsh-cookie-sweep.git"
-  },
-  "bugs": {
-    "url": "https://github.com/15224744/dsh-cookie-sweep/issues"
-  },
-  "homepage": "https://github.com/15224744/dsh-cookie-sweep#readme"
+  }
 }

@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { findCookieDbs } from '../lib/targets.js'
+import { execFileSync } from 'node:child_process'
 import { inspect, sweepAll, summarize, fmtBytes, sqliteAvailable } from '../lib/sweep.js'
 import { paths, readLast, writeLast, appendLog, oneLine, SWEEP_HOME } from '../lib/report.js'
 import { alivePids, readLock, lockIsFresh, releaseLock } from '../lib/sentinel.js'
@@ -151,12 +152,31 @@ async function retryWhileLocked(runSweep) {
   return rows
 }
 
+// 宿主还在跑就绝不动库：锁着读不到，就算写进去也可能删掉新会话刚拿到的登录态。
+function dshRunning() {
+  try {
+    const out = execFileSync(
+      'tasklist',
+      ['/FI', 'IMAGENAME eq DeepSeek Harness.exe', '/NH', '/FO', 'CSV'],
+      { encoding: 'utf8', windowsHide: true, timeout: 8000 },
+    )
+    return /DeepSeek Harness.exe/i.test(out)
+  } catch {
+    return false
+  }
+}
+
 async function applySweep(apply) {
   const lock = readLock(root)
   if (lock && lockIsFresh(lock)) {
     out(`另一个清理进程还在跑（pid ${lock.pid}），这次跳过`)
     return 0
   }
+  if (apply && !has('--force-run') && dshRunning()) {
+    out('DSH 还在运行，这次不动库（库锁着，也可能删掉新会话的登录态）。退出 DSH 后再来，或加 --force-run 强制。')
+    return 0
+  }
+
   const p = paths(root)
   mkdirSync(p.root, { recursive: true })
   try {

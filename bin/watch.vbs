@@ -3,10 +3,17 @@
 '       and UTF-8 Chinese comments can break parsing with a bogus "Loop without Do".
 ' args: 0 = pids (comma)  1 = node exe  2 = helper.mjs  3 = log file
 '       4 = timeout hours  5 = sweep root  6 = process name (optional, reference only)
+'
+' v0.2.0 exit rule (safety first):
+'   - pids gone AND app name gone for GRACE seconds  -> sweep
+'   - app name comes back while waiting (quick relaunch) -> exit, no sweep
+'   - app name never goes away (stuck process) -> give up after GIVEUP seconds
+'   - never sweep while any process of the app is alive
 Option Explicit
 
 Dim pids, nodeExe, helper, logFile, timeoutHours, rootDir, procName
-Dim shell, fso, wmi, startTime, alive, nameAlive, goneSince, pidList, i, col
+Dim shell, fso, locator, svc, startTime, alive, nameAlive, goneSince, pidList, i, col
+Dim sawNameGone
 pids = WScript.Arguments(0)
 nodeExe = WScript.Arguments(1)
 helper = WScript.Arguments(2)
@@ -16,46 +23,61 @@ rootDir = WScript.Arguments(5)
 procName = ""
 If WScript.Arguments.Count > 6 Then procName = WScript.Arguments(6)
 
+Const GRACE = 45
+Const GIVEUP = 90
+
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
-Set wmi = GetObject("winmgmts:\\.\root\cimv2")
+Set locator = WScript.CreateObject("WbemScripting.SWbemLocator")
+Set svc = locator.ConnectServer(".", "root\cimv2")
 startTime = Now()
 goneSince = 0
+sawNameGone = False
 pidList = Split(pids, ",")
 
-Log "sentinel start, watching " & pids & " (+" & procName & "), timeout " & timeoutHours & "h"
+Log "sentinel start (v0.2.0 safe), watching " & pids & " (+" & procName & "), timeout " & timeoutHours & "h"
 
-' Exit rule:
-'   all watched pids gone -> record the time, wait 45s;
-'   if the whole app is gone too, sweep right away; if the app name is still
-'   there (quit and relaunched quickly), wait at most 120s and sweep anyway --
-'   the lock of the new instance is retried by the helper itself.
 Do
   WScript.Sleep 2000
   alive = False
 
   For i = 0 To UBound(pidList)
     If Trim(pidList(i)) <> "" Then
-      Set col = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE ProcessId=" & Trim(pidList(i)))
+      Set col = svc.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE ProcessId=" & Trim(pidList(i)))
       If col.Count > 0 Then alive = True
     End If
   Next
 
   nameAlive = False
   If procName <> "" Then
-    Set col = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='" & procName & "'")
+    Set col = svc.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='" & procName & "'")
     If col.Count > 0 Then nameAlive = True
   End If
 
   If alive Then
     goneSince = 0
+    sawNameGone = False
   Else
-    If goneSince = 0 Then goneSince = Now()
-    If GoneSeconds(goneSince) >= 45 And Not nameAlive Then
-      DoSweep
-    ElseIf GoneSeconds(goneSince) >= 120 Then
-      Log "pids gone but app name still running, sweeping anyway"
-      DoSweep
+    If Not nameAlive Then
+      sawNameGone = True
+      If goneSince = 0 Then
+        goneSince = Now()
+        Log "app gone, waiting " & GRACE & "s to be sure"
+      ElseIf GoneSeconds(goneSince) >= GRACE Then
+        DoSweep
+      End If
+    Else
+      If sawNameGone Then
+        Log "app came back while waiting, exit without sweep"
+        WScript.Quit 0
+      End If
+      If goneSince = 0 Then
+        goneSince = Now()
+        Log "pids gone but app name alive, waiting up to " & GIVEUP & "s"
+      ElseIf GoneSeconds(goneSince) >= GIVEUP Then
+        Log "app still running after " & GIVEUP & "s, exit without sweep"
+        WScript.Quit 0
+      End If
     End If
   End If
 

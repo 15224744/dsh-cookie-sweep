@@ -1,143 +1,117 @@
 # dsh-cookie-sweep
 
-给 DeepSeek Harness 桌面版用的 cookie 清理插件。
+顺手扫掉 DSH 登录留下的 `dsh-auth-*` cookie。
 
-DSH 在 HTTP 下把 `host:port` 当作 cookie 受众，而**端口每次启动都变**，于是每次启动都会新签发一条
-`dsh-auth-<sha256(host:port)>`，有效期 30 天、没有任何清理，攒到约 75 次启动（≈16KB 请求头）就会被
-431 挡在门外，表现成「DSH 打不开 / `Web authentication failed`」。
+## 为什么会有这个
 
-这个插件在 DSH 退出后把 `dsh-auth-*` 清掉一次。**账号登录 cookie 一条不动**，删前每个库单独备份。
+DSH 的 `dsh-client-connection` 在 HTTP 下把 authority（`host:port`）当作 cookie 的受众：
 
-## 功能
-
-- 退出后自动清理，不用再手动删 `Cookies`
-- 默认只删 `dsh-auth-*`；`.bilibili.com`、`.deepseek.com` 这些账号域不碰
-- 扫**默认库 + 所有 `Partitions\*\Network\Cookies`**（主窗口实际用的是按账号 hash 命名的分区库）
-- 删除前每库备份到 `~/.dsh/cookie-sweep/backups/`，默认留 5 份
-- 失败也写报告：`last-report.json` 里能看出哪个库没清成、为什么
-- 不联网、不 kill 任何进程、出错只写日志
-- 命令行可随时 `status` / `dry-run` / `apply`
-
-## 症状对不对得上
-
-满足这几条基本就是它：
-
-1. 用了一段时间后 DSH 启动失败或白屏，日志里有 `Web authentication failed` 或 431；
-2. 删掉 `%APPDATA%\@deepseek-ai\dsh-desktop\Network\Cookies` 就能起来；
-3. 每次启动端口都不一样（`127.0.0.1:54516` → `:60218` → …）。
-
-## 安装
-
-要求：
-
-- DSH 桌面版（`0.2.1-rc.x` 同代插件 API）
-- Node.js >= 22（用到 `node:sqlite`；DSH 自带的是 Node 24）
-
-**推荐**：把本仓库放到 `C:\Users\<你>\.dsh\plugins\cookie-sweep`，然后在 DSH 里让 agent 执行
-
-```
-plugin_manager action=install_bundle target=C:\Users\<你>\.dsh\plugins\cookie-sweep
+```js
+const COOKIE_PREFIX = 'dsh-auth-'
+cookieName(authority) = COOKIE_PREFIX + base64url(sha256(authority))
 ```
 
-它会代做依赖与 `bundles` 注册，比手改 profile 安全。
+桌面版每次启动都换端口，于是每次启动都签发一条**名字不同**的新 cookie，有效期 30 天，而主窗口没人清它。
+一条 cookie 的请求头约 216 字节，攒到浏览器上限 16384 字节（约 **75 次启动**）就开始报 `431 Request Header Fields Too Large`，
+表现成「DSH 突然打不开 / Web authentication failed」。
 
-也可以走 GUI：**设置 → 插件 → 从本地路径安装**，选这个目录。
+## 它怎么修
 
-装完**重启 DSH**（退出再开）——插件只在宿主启动时布置哨兵。
+- 启动时布置一个**脱离的哨兵**（Windows 用 `wscript` 跑 `bin/watch.vbs`，无控制台窗口；没有 wscript 就退回 node 轮询）。
+- 每 2 秒看一次宿主 pid；pid 全没了先等 45 秒，应用名也不在了就清，应用名还在（退出又马上重开）最多等 120 秒照清。
+- 库还被 Chromium 占着时，helper 会**重试最多 2 分钟**（60 次 × 2 秒），不会把「刚退出、文件还没放开」当成失败。
+- **默认只删 `dsh-auth-*`**：账号域（`.bilibili.com`、`.deepseek.com`）的 cookie 一条不动。
+- 扫**默认库 + 所有 `Partitions\*\Network\Cookies`**（分区库也清）。
+- 删前每库单独备份到 `~/.dsh/cookie-sweep/backups/`，默认留 5 份。
+- 每次运行都写 `last-report.json`（失败也写）并往 `sweep.log` 记一行，事后能查清「哪一轮、删了几条、为什么没删成」。
+- 同一个宿主进程只挂**一个**哨兵（按 `sentinel.json` 里的 `ownerPid` 去重），不会每次启动多留一个。
+- 哨兵有死线（默认 12 小时）到点自退；**不 kill 任何进程**；全程无网络请求。
 
-> 不要手改 `profiles\desktop\package.json`。真要改，先备份，改完跑 `node bin/check-config.mjs`，
-> 不绿不要重启（启动链上任何一个文件带 BOM 都会让 DSH 起不来）。
+> `watch.vbs` 必须保持纯 ASCII：WSH 在没有 BOM 时按 ANSI 读 `.vbs`，
+> UTF-8 中文注释会报一个假的 `'loop' 语句缺少 'do'`。
 
-## 验证
+范围、份数、死线都可以在配置里改。
 
-退出 DSH，等 45–120 秒，再打开，然后看：
+## 手动用
 
-```powershell
-Get-Content "$env:USERPROFILE\.dsh\cookie-sweep\last-report.json" -Raw
-Get-Content "$env:USERPROFILE\.dsh\cookie-sweep\sweep.log" -Tail 5
+```bash
+node bin/helper.mjs status      # 每个库多少条、dsh-auth 占多少字节
+node bin/helper.mjs dry-run     # 算一遍，什么都不动
+node bin/helper.mjs apply       # 真删（先备份）
+node bin/helper.mjs apply --scope local   # 连本机 origin 的其它 cookie 一起删
+node bin/helper.mjs apply --keep 3 --vacuum
 ```
 
-正常应该看到：
+`status` / `dry-run` 在 DSH 运行时会提示「打不开 cookie 库」——这是正常的，库被宿主独占锁着，
+哨兵就是为这个存在的：等你退出再清。
 
-```
-14:30 [vbs] targets gone, sweeping
-14:30 清掉 4 条登录 cookie，释放约 1.1 KB
-14:30 [vbs] sentinel done
-```
+## 配置（可选）
 
-`last-report.json` 里是 `deleted` / `freed` / `failed` 与每个库的明细、备份路径。
-（示例见 `docs/example-report.json`、`docs/example-sweep.log`。）
-
-## 配置
-
-在 `~/.dsh/profiles/desktop/cordis.patch.yml` 里给这一条加 `config`：
+在 profile 的 patch 里给 `dsh-cookie-sweep` 覆盖即可：
 
 ```yaml
 - id: dsh-cookie-sweep
   config:
-    enabled: true
-    scope: auth        # auth=只删 dsh-auth-*；local=连本机 host 的其它 cookie 一起删
-    keepBackups: 5     # 每个库留几份备份，0 = 不备份
-    timeoutHours: 12   # 哨兵死线，到点自退
+    enabled: true        # false = 只保留诊断日志，不布置哨兵
+    scope: auth          # auth（默认，只删 dsh-auth-*）| local（本机 origin 全删）
+    keepBackups: 5
+    timeoutHours: 12
 ```
 
-## 命令行（不装插件也能用）
+## 装/卸
 
 ```bash
-node bin/helper.mjs status        # 每个库多少条、占多少字节
-node bin/helper.mjs dry-run       # 只算不清
-node bin/helper.mjs apply         # 真清（先备份）
-node bin/helper.mjs apply --scope local --vacuum
-node bin/helper.mjs --help
+# 装（用 DSH 自己的插件管理器，不要手改 profile 的 package.json）
+plugin_manager action=install_bundle target=C:\Users\Windows11\.dsh\plugins\cookie-sweep
+# 卸
+plugin_manager action=set_bundle target=dsh-cookie-sweep enabled=false
 ```
 
-DSH 正在跑时库是被锁的，`apply` 会提示「多半是 DSH 还在跑」——这是正常的，所以插件用「退出后清」这个时机。
+装完重启一次 DSH，哨兵才会挂上。之后你正常用、正常退，不用管。
 
-## 卸载
+## 文件
 
-```
-plugin_manager action=remove_bundle target=dsh-cookie-sweep
-```
+- `lib/index.js` —— 插件入口（读上次报告、诊断当前库、布置哨兵；全部 try/catch）
+- `lib/targets.js` —— 找库：默认库 + `Partitions\*` + `DSH_COOKIE_DB`
+- `lib/sweep.js` —— 数 / 备份 / 删（`node:sqlite`，参数绑定）
+- `lib/sentinel.js` —— 哨兵进程与锁
+- `lib/report.js` —— 上次报告 `~/.dsh/cookie-sweep/last-report.json` 与日志
+- `bin/helper.mjs` —— CLI（status / dry-run / apply / watch）
+- `bin/watch.vbs` —— Windows 哨兵（WMI 查 pid，GUI 子系统无窗口）
+- `test/sweep.test.mjs`、`test/sentinel.test.mjs` —— 用临时库测，不碰真库
 
-再删 `~/.dsh/cookie-sweep/`。里面是整库备份（含账号 cookie，Chrome 加密存储），**别外传**。
+## 与第三方实现的差别
 
-## 原理与算术
+| | 这个 | 常见做法 |
+|---|---|---|
+| 扫描范围 | 默认库 + 所有分区库 | 只默认库 |
+| 删除范围 | 默认只 `dsh-auth-*` | 本机 host 的全部 cookie |
+| 备份 | 每库独立、按份数滚动 | 整库一份 |
+| 哨兵 | 12 小时死线、到点自退 | 常驻直到退出（无死线） |
+| 杀进程 | 不杀 | 会 kill 过期锁里的 pid |
 
-- `dsh-client-connection` 的 `cookieName(authority) = "dsh-auth-" + base64url(sha256(authority))`，名字 52 字符；
-- HTTP 下 `requestAudience()` 返回 `url.host`（含端口），端口每次启动重掷；
-- cookie 值 `v1.<base64url(JSON{version,authority,issuedAt,expiresAt})>.<base64url(hmac)>` 约 161 字符；
-- 一条 cookie 的请求头 ≈ 216 字节（52 + 161 + 分隔），`16384 / 216 ≈ 75` 次启动；
-- 只在 `GET /?token=<launchToken>` 时签发，30 天后过期，主窗口 session 无人清理。
+## 已知边界
 
-## 和 dsh-cookie-cleaner 的区别
+- 需要 Node ≥ 22（`node:sqlite`）。不够时插件只打一行 warn，不做事。
+- 如果宿主不是 Electron 的 node 而是别的运行时，`process.execPath` 可能不是 node；可用环境变量
+  `DSH_COOKIE_SWEEP_NODE` 指定一个 node 解释器。
+- 库被占用时清不了是设计如此：清理只发生在退出之后。
 
-| | dsh-cookie-cleaner | 本项目 |
-| --- | --- | --- |
-| 扫描范围 | 默认 `Network\Cookies` | 默认库 **+ 所有 `Partitions\*\Network\Cookies`** |
-| 删除范围 | 本机 host 的全部 cookie | 默认只删 `dsh-auth-*` |
-| 备份 | 整库副本 | 整库副本（可按 `keepBackups` 关闭） |
-| 常驻 | 隐藏的 `wscript`（约 5MB） | 同上，12 小时死线自退 |
-| 失败报告 | 有 | 有（失败也写 `last-report.json`） |
+## 0.2.0：安全优先（2026-11-02）
 
-两个都能用，选哪个看你要「按 host 全清」还是「只清这一种 cookie」。
+之前的规则里有一条「pid 没了但进程名还在 → 等 120 秒照清」。实测踩到过：宿主是多进程 Electron，pid 先消失、主窗口还在，哨兵就在**应用仍然活着**的时候去删库 —— 而 `dsh-auth-*` 正是宿主自己的登录态，这就是那次「登录态丢失」的可疑来源。
 
-## 测试
+新规则（`bin/watch.vbs`）：
 
-```bash
-node test/sweep.test.mjs       # 22 项
-node test/sentinel.test.mjs    # 15 项
-node bin/check-config.mjs      # 如果你还带着工作区的配置体检脚本
-```
+| 情形 | 动作 |
+|---|---|
+| 所有 pid 消失 + 进程名消失，持续 45 秒 | 清一次，退出 |
+| 等待期间进程名又出现（刚重启） | **清都不清，直接退出**（新实例有自己的哨兵） |
+| 进程名一直不消失（卡死的进程） | 最多等 90 秒，放弃并退出 |
+| 12 小时死线 | 退出 |
 
-## 踩过的坑（维护者笔记）
+另外：
 
-1. **`watch.vbs` 必须纯 ASCII**。WSH 在没有 BOM 时按 ANSI 读，中文注释会变成
-   `'loop' 语句缺少 'do'`，哨兵一启动就死，日志里什么都不留。
-2. 判定退出别只盯 pid：Electron 是多进程，pid 换得比进程名快。现在用「pid 全没了 + 45 秒」，
-   应用名也没了立刻清，应用名还在最多等 120 秒照清。
-3. 新实例启动时**不要杀**上一轮还在等的哨兵，否则「退出后马上重开」这一轮就永远清不掉。
-4. 备份按文件名排序，别按 mtime——刚建的那份会把自己当成旧的删掉。
-
-## License
-
-MIT
+- `bin/helper.mjs` 在真正写库前再查一次 `tasklist`，宿主还在跑就跳过（`--force-run` 可强制）。
+- 26H2 之后 WSH 里 `GetObject("winmgmts:\.ootcimv2")` 会报 `0x80041021`（同机 PowerShell 的 CIM/COM 都正常），改用 `WbemScripting.SWbemLocator` 的 `ConnectServer`。
+- 回归测试 `test/safety.test.mjs`：断言危险分支已删、退回不扫、VBS 纯 ASCII、helper 守卫存在。
